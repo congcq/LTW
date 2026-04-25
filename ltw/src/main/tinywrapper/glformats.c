@@ -251,6 +251,24 @@ INTERNAL bool is_type_basic(GLenum type) {
     }
 }
 
+static bool is_rgba8_special(GLenum format, GLenum type) {
+    switch (format) {
+        case GL_RGBA:
+        case GL_BGRA:
+        case GL_ABGR_EXT:
+            break;
+        default:
+            return false;
+    }
+    switch (type) {
+        case GL_UNSIGNED_INT_8_8_8_8_REV:
+        case GL_UNSIGNED_INT_8_8_8_8:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static int num_color_channels(GLenum format) {
     switch (format) {
         case GL_RED:
@@ -397,20 +415,16 @@ CONVERT(GLubyte, GLubyte, 3, 4, {
     outrow[outbase + 3] = UINT8_MAX;
 })
 
+static inline void reverse_swizzle(unsigned char swizzle[4]) {
+    unsigned char swizzle_temp[4] = {swizzle[0], swizzle[1], swizzle[2], swizzle[3]};
+    swizzle[0] = swizzle_temp[3];
+    swizzle[1] = swizzle_temp[2];
+    swizzle[2] = swizzle_temp[1];
+    swizzle[3] = swizzle_temp[0];
+}
+
 INTERNAL void convert_texture2d(GLenum type, GLenum format, GLuint width, GLuint height, GLvoid const* data, GLenum outtype, GLenum outformat, GLvoid** outdata) {
-
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-#define U32_4C_COMPATIBLE_TYPE GL_UNSIGNED_INT_8_8_8_8_REV
-#else
-#define U32_4C_COMPATIBLE_TYPE GL_UNSIGNED_INT_8_8_8_8
-#endif
-    if(type == U32_4C_COMPATIBLE_TYPE && (format == GL_RGBA || format == GL_BGRA || format == GL_ABGR_EXT)) {
-        type = GL_UNSIGNED_BYTE;
-    }
-    // TODO: adjust swizzle for GL_UNSIGNED_INT_8_8_8_8
-#undef U32_4C_COMPATIBLE_TYPE
-
-    if(!is_type_basic(type) || !is_type_basic(outtype)) {
+    if((!is_type_basic(type) && !is_rgba8_special(format, type)) || !is_type_basic(outtype)) {
         LOGI("conversion between non-basic types %x and %x", type, outtype);
         return;
     }
@@ -448,6 +462,22 @@ INTERNAL void convert_texture2d(GLenum type, GLenum format, GLuint width, GLuint
             swizzle[3] = 0;
             break;
     }
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define UNSIGNED_DIRECT_FORMAT GL_UNSIGNED_INT_8_8_8_8_REV
+#define UNSIGNED_REVERSE_FORMAT  GL_UNSIGNED_INT_8_8_8_8
+#else
+#define UNSIGNED_DIRECT_FORMAT GL_UNSIGNED_INT_8_8_8_8
+#define UNSIGNED_REVERSE_FORMAT  GL_UNSIGNED_INT_8_8_8_8_REV
+#endif
+    switch(type) {
+        case UNSIGNED_REVERSE_FORMAT:
+            reverse_swizzle(swizzle);
+        case UNSIGNED_DIRECT_FORMAT:
+            type = GL_UNSIGNED_BYTE;
+            break;
+    }
+#undef UNSIGNED_DIRECT_FORMAT
+#undef UNSIGNED_REVERSE_FORMAT
 
     unpack_state_t *state = &current_context->unpack;
 
