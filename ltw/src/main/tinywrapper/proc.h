@@ -9,7 +9,8 @@
 
 #include <GLES3/gl32.h>
 #include <GLES2/gl2ext.h>
-#include <threads.h>
+#include <stdio.h>
+#include <pthread.h>
 
 typedef void (*eglMustCastToProperFunctionPointerType)(void);
 

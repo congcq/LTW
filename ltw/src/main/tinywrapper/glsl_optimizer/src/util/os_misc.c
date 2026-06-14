@@ -32,7 +32,6 @@
 #include "os_file.h"
 #include "ralloc.h"
 #include "simple_mtx.h"
-#include "android/log.h"
 
 #include <stdarg.h>
 

@@ -4,17 +4,20 @@
  * For use under LGPL-3.0
  */
 #include "egl.h"
+#include "proc.h"
 #include "unordered_map/int_hash.h"
 #include "string_utils.h"
 #include "env.h"
+#include "unordered_map/unordered_map.h"
 #include <string.h>
 
-thread_local context_t *current_context;
+__thread context_t *internal_current_context = NULL;
 unordered_map* context_map;
 
 EGLContext (*host_eglCreateContext)(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list);
 EGLBoolean (*host_eglDestroyContext)(EGLDisplay dpy, EGLContext ctx);
 EGLBoolean (*host_eglMakeCurrent) (EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx);
+EGLContext (*host_eglGetCurrentContext)(void);
 
 void init_egl() {
     context_map = alloc_intmap();
@@ -24,6 +27,7 @@ void init_egl() {
             "eglDestroyContext");
     host_eglMakeCurrent = (EGLBoolean (*)(EGLDisplay, EGLSurface, EGLSurface,
                                           EGLContext)) host_eglGetProcAddress("eglMakeCurrent");
+    host_eglGetCurrentContext = (EGLContext (*)(void)) host_eglGetProcAddress("eglGetCurrentContext");
 }
 
 static bool init_context(context_t* tw_context) {
@@ -214,6 +218,39 @@ static void init_incontext(context_t* tw_context) {
     es3_functions.glGenBuffers(1, &tw_context->multidraw_element_buffer);
 }
 
+context_t* ltw_get_current_context(void) {
+    if (!host_eglGetCurrentContext) return internal_current_context;
+
+    EGLContext phys_context = host_eglGetCurrentContext();
+    if (phys_context == EGL_NO_CONTEXT) {
+        internal_current_context = NULL;
+        return NULL;
+    }
+
+    if (internal_current_context && internal_current_context->phys_context == phys_context) {
+        return internal_current_context;
+    }
+
+    context_t* tw_context = unordered_map_get(context_map, phys_context);
+    if (!tw_context) {
+        tw_context = calloc(1, sizeof(context_t));
+        if (!tw_context || !init_context(tw_context)) {
+            if (tw_context) free(tw_context);
+            return NULL;
+        }
+        tw_context->phys_context = phys_context;
+        unordered_map_put(context_map, phys_context, tw_context);
+    }
+
+    if (!tw_context->context_rdy) {
+        init_incontext(tw_context);
+        tw_context->context_rdy = true;
+    }
+
+    internal_current_context = tw_context;
+    return internal_current_context;
+}
+
 EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list) {
     EGLContext phys_context = host_eglCreateContext(dpy, config, share_context, attrib_list);
     if(phys_context == EGL_NO_CONTEXT) return phys_context;
@@ -223,6 +260,7 @@ EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_c
         host_eglDestroyContext(dpy, phys_context);
         return EGL_NO_CONTEXT;
     }
+    tw_context->phys_context = phys_context;
     unordered_map_put(context_map, phys_context, tw_context);
     return phys_context;
 }
@@ -230,26 +268,37 @@ EGLContext eglCreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_c
 EGLBoolean eglDestroyContext (EGLDisplay dpy, EGLContext ctx) {
     if(!host_eglDestroyContext(dpy, ctx)) return EGL_FALSE;
     context_t* old_ctx = unordered_map_remove(context_map, ctx);
-    free_context(old_ctx);
-    free(old_ctx);
+    if (old_ctx) {
+        if (internal_current_context == old_ctx) {
+            internal_current_context = NULL;
+        }
+        free_context(old_ctx);
+        free(old_ctx);
+    }
+    
     return EGL_TRUE;
 }
 
 EGLBoolean eglMakeCurrent (EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx) {
     if(!host_eglMakeCurrent(dpy, draw, read, ctx)) return EGL_FALSE;
     if(ctx == EGL_NO_CONTEXT) {
-        current_context = NULL;
+        internal_current_context = NULL;
         return EGL_TRUE;
     }
     context_t* tw_context = unordered_map_get(context_map, ctx);
     if(tw_context == NULL) {
-        printf("TinywrapperEGL: Failed to find context %p\n", ctx);
-        abort();
+        tw_context = calloc(1, sizeof(context_t));
+        if (tw_context == NULL || !init_context(tw_context)) {
+            if (tw_context) free(tw_context);
+            return EGL_FALSE;
+        }
+        tw_context->phys_context = ctx;
+        unordered_map_put(context_map, ctx, tw_context);
     }
     if(!tw_context->context_rdy) {
         init_incontext(tw_context);
         tw_context->context_rdy = true;
     }
-    current_context = tw_context;
+    internal_current_context = tw_context;
     return EGL_TRUE;
 }

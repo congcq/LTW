@@ -7,7 +7,6 @@
 #include <GLES3/gl31.h>
 #include <dlfcn.h>
 #include <stdlib.h>
-#include <android/log.h>
 #include <string.h>
 #include "proc.h"
 #include "egl.h"
@@ -20,12 +19,12 @@ INTERNAL eglMustCastToProperFunctionPointerType (*host_eglGetProcAddress)(const 
 INTERNAL es3_functions_t es3_functions;
 
 static void error_sysegl() {
-    __android_log_print(ANDROID_LOG_ERROR, "LTWInit", "Failed to load system EGL: %s", dlerror());
+    fprintf(stderr, "LTWInit: Failed to load system EGL: %s", dlerror());
     abort();
 }
 
 static void error_init(const char* functionName) {
-    __android_log_print(ANDROID_LOG_ERROR, "LTWInit", "Failed to load function \"%s\"", functionName);
+    fprintf(stderr, "LTWInit: Failed to load function \"%s\"", functionName);
     abort();
 }
 
@@ -39,7 +38,7 @@ static void init_es3_proc() {
 }
 
 __attribute__((constructor, used)) void proc_init(){
-    const char* systemEglPath = "libEGL.so";
+    const char* systemEglPath = "@rpath/libtinygl4angle.dylib";
     const char* eglPath = getenv("LIBGL_EGL") != NULL ? getenv("LIBGL_EGL") : systemEglPath;
     int flags = RTLD_LAZY | RTLD_LOCAL;
     void* eglHandle = dlopen(eglPath, flags);
@@ -74,7 +73,7 @@ eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *procname) {
     if(strncmp(procname, "gl", 2) != 0) goto fallback;
 #define GLESOVERRIDE(name)                                        \
     if(!strcmp(procname, #name)) {                                \
-        printf("LTW: Overridden %s\n", #name);                        \
+        fprintf(stderr, "LTW: Overridden %s\n", #name);                        \
         return (eglMustCastToProperFunctionPointerType) name;     \
     }
 #include "es3_overrides.h"

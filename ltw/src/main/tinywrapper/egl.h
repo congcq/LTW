@@ -93,7 +93,10 @@ typedef struct {
     char** extra_extensions_array;
 } context_t;
 
-extern thread_local context_t *current_context;
+extern __thread context_t *internal_current_context;
+extern context_t* ltw_get_current_context(void);
+#define current_context ltw_get_current_context()
+
 extern void init_egl();
 extern GLenum get_textarget_query_param(GLenum target);
 
